@@ -49,7 +49,7 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
-function escapeRegex(str: string): string {
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -57,6 +57,23 @@ export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+/**
+ * Build a trigger pattern for a specific group trigger (e.g. "@Betty").
+ * Matches: @Betty, Hey Betty, Betty (at start of message).
+ * Also matches inside [Voice: ...] transcriptions.
+ */
+export function makeTriggerPattern(trigger: string): RegExp {
+  const name = trigger.startsWith('@') ? trigger.slice(1) : trigger;
+  const escaped = escapeRegex(name);
+  // Match: @Name, Hey Name, Hi Name, or just Name at start (case-insensitive)
+  // Also match inside voice transcription prefix: [Voice: Hey Name ...]
+  // Also match photo descriptions: [Photo: ...]
+  return new RegExp(
+    `(?:^@${escaped}\\b|^(?:hey|hi|yo)\\s+${escaped}\\b|^\\[Voice:\\s*(?:hey|hi|yo)\\s+${escaped}\\b|^\\[Voice:\\s*@?${escaped}\\b|^\\[Photo:)`,
+    'i',
+  );
+}
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
