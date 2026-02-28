@@ -79,7 +79,9 @@ export async function describeImageMessage(
     }
 
     const mimeType = msg.message?.imageMessage?.mimetype || 'image/jpeg';
-    console.log(`Downloaded image message: ${buffer.length} bytes (${mimeType})`);
+    console.log(
+      `Downloaded image message: ${buffer.length} bytes (${mimeType})`,
+    );
 
     const description = await describeWithOpenAI(buffer, mimeType);
 

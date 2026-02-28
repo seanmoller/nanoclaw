@@ -30,6 +30,9 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  containerImage?: string; // Override container image (default: CONTAINER_IMAGE)
+  agentRunnerSource?: string; // Path to alt agent-runner source (relative to project root)
+  secretKeys?: string[]; // .env keys to pass as secrets (default: Claude keys)
 }
 
 export interface RegisteredGroup {
@@ -81,7 +84,7 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, agentName?: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

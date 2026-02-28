@@ -11,16 +11,21 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+  ASSISTANT_HAS_OWN_NUMBER,
+  ASSISTANT_NAME,
+  STORE_DIR,
+} from '../config.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import { isImageMessage, describeImageMessage } from '../image-description.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -59,7 +64,10 @@ export class WhatsAppChannel implements Channel {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
     const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      logger.warn(
+        { err },
+        'Failed to fetch latest WA Web version, using default',
+      );
       return { version: undefined };
     });
     this.sock = makeWASocket({
@@ -88,9 +96,18 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+        const reason = (
+          lastDisconnect?.error as { output?: { statusCode?: number } }
+        )?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
@@ -169,7 +186,13 @@ export class WhatsAppChannel implements Channel {
 
         // Always notify about chat metadata for group discovery
         const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'whatsapp',
+          isGroup,
+        );
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
@@ -183,7 +206,8 @@ export class WhatsAppChannel implements Channel {
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           // but allow voice messages and image messages through for processing
-          if (!content && !isVoiceMessage(msg) && !isImageMessage(msg)) continue;
+          if (!content && !isVoiceMessage(msg) && !isImageMessage(msg))
+            continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -196,7 +220,9 @@ export class WhatsAppChannel implements Channel {
             : (() => {
                 const groups = this.opts.registeredGroups();
                 return Object.values(groups).some((g) => {
-                  const agentName = g.trigger.startsWith('@') ? g.trigger.slice(1) : g.trigger;
+                  const agentName = g.trigger.startsWith('@')
+                    ? g.trigger.slice(1)
+                    : g.trigger;
                   return content.startsWith(`${agentName}:`);
                 });
               })();
@@ -208,7 +234,10 @@ export class WhatsAppChannel implements Channel {
               const transcript = await transcribeAudioMessage(msg, this.sock);
               if (transcript) {
                 finalContent = `[Voice: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+                logger.info(
+                  { chatJid, length: transcript.length },
+                  'Transcribed voice message',
+                );
               } else {
                 finalContent = '[Voice Message - transcription unavailable]';
               }
@@ -224,7 +253,10 @@ export class WhatsAppChannel implements Channel {
                 finalContent = caption
                   ? `[Photo: ${description}]\n(User caption: ${caption})`
                   : `[Photo: ${description}]`;
-                logger.info({ chatJid, length: description.length }, 'Described image message');
+                logger.info(
+                  { chatJid, length: description.length },
+                  'Described image message',
+                );
               } else {
                 finalContent = '[Photo - description unavailable]';
               }
@@ -249,19 +281,24 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string, agentName?: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    agentName?: string,
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
     const name = agentName || ASSISTANT_NAME;
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${name}: ${text}`;
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER ? text : `${name}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {
@@ -270,7 +307,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
     }
   }
 
@@ -340,7 +380,10 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
       return cached;
     }
 
@@ -350,7 +393,10 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
         return phoneJid;
       }
     } catch (err) {
@@ -364,12 +410,18 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
         await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        logger.info(
+          { jid: item.jid, length: item.text.length },
+          'Queued message sent',
+        );
       }
     } finally {
       this.flushing = false;

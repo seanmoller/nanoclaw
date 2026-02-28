@@ -7,6 +7,7 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  makeTriggerPattern,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
@@ -153,8 +154,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
+    const triggerPattern = makeTriggerPattern(group.trigger);
     const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
+      triggerPattern.test(m.content.trim()),
     );
     if (!hasTrigger) return true;
   }
@@ -198,11 +200,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      // Strip reasoning blocks — <internal> (Claude), <think> (Qwen/other models)
+      const text = raw
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .replace(/<think>[\s\S]*?<\/think>/g, '')
+        .trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        const agentName = group.trigger.startsWith('@')
+          ? group.trigger.slice(1)
+          : group.trigger;
+        await channel.sendMessage(chatJid, text, agentName);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -290,6 +298,9 @@ async function runAgent(
     : undefined;
 
   try {
+    const agentName = group.trigger.startsWith('@')
+      ? group.trigger.slice(1)
+      : group.trigger;
     const output = await runContainerAgent(
       group,
       {
@@ -298,7 +309,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: ASSISTANT_NAME,
+        assistantName: agentName,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -378,8 +389,9 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
+            const triggerPattern = makeTriggerPattern(group.trigger);
             const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+              triggerPattern.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
           }
@@ -493,14 +505,29 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) {
+        // Look up the agent name from the group registered to this JID
+        const group = registeredGroups[jid];
+        const agentName = group
+          ? group.trigger.startsWith('@')
+            ? group.trigger.slice(1)
+            : group.trigger
+          : undefined;
+        await channel.sendMessage(jid, text, agentName);
+      }
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      const group = registeredGroups[jid];
+      const agentName = group
+        ? group.trigger.startsWith('@')
+          ? group.trigger.slice(1)
+          : group.trigger
+        : undefined;
+      return channel.sendMessage(jid, text, agentName);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

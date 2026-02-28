@@ -165,26 +165,27 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(
-    projectRoot,
-    'container',
-    'agent-runner',
-    'src',
-  );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  // Skip for custom agent runners (containerImage set) — they ship pre-built
+  // code in the image and don't need runtime recompilation.
+  if (!group.containerConfig?.containerImage) {
+    const agentRunnerSrc = group.containerConfig?.agentRunnerSource
+      ? path.join(projectRoot, group.containerConfig.agentRunnerSource)
+      : path.join(projectRoot, 'container', 'agent-runner', 'src');
+    const groupAgentRunnerDir = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      'agent-runner-src',
+    );
+    if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    }
+    mounts.push({
+      hostPath: groupAgentRunnerDir,
+      containerPath: '/app/src',
+      readonly: false,
+    });
   }
-  mounts.push({
-    hostPath: groupAgentRunnerDir,
-    containerPath: '/app/src',
-    readonly: false,
-  });
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -202,14 +203,20 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ * Per-group secretKeys override the default Claude keys.
  */
-function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+function readSecrets(group: RegisteredGroup): Record<string, string> {
+  const keys = group.containerConfig?.secretKeys || [
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+  ];
+  return readEnvFile(keys);
 }
 
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  group: RegisteredGroup,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -234,7 +241,7 @@ function buildContainerArgs(
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  args.push(group.containerConfig?.containerImage || CONTAINER_IMAGE);
 
   return args;
 }
@@ -253,7 +260,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group);
 
   logger.debug(
     {
@@ -294,7 +301,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    input.secrets = readSecrets(group);
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
     // Remove secrets from input so they don't appear in logs
